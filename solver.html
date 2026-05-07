@@ -1,0 +1,434 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Solitaire Deadlock Demo</title>
+    <script src="https://cdn.tailwindcss.com"></script>
+    <style>
+        body { font-family: 'Inter', sans-serif; }
+        .card {
+            width: 80px;
+            height: 120px;
+            border: 1px solid #999;
+            border-radius: 8px;
+            background-color: white;
+            display: flex;
+            flex-direction: column;
+            justify-content: space-between;
+            padding: 8px;
+            font-size: 1.25rem;
+            font-weight: 600;
+            cursor: grab;
+            user-select: none;
+            box-shadow: 0 2px 4px rgba(0,0,0,0.1);
+            position: relative; /* For stacking */
+        }
+        .card.is-red { color: #D91823; }
+        .card.is-black { color: #222; }
+        .card-top { text-align: left; }
+        .card-bottom { text-align: right; transform: rotate(180deg); }
+        .card.highlight-problem {
+            box-shadow: 0 0 15px 5px rgba(255, 0, 0, 0.7);
+            border: 2px solid red;
+            z-index: 20;
+        }
+         .card.highlight-blocker {
+            box-shadow: 0 0 15px 5px rgba(255, 165, 0, 0.7);
+            border: 2px solid orange;
+            z-index: 10;
+        }
+        .column .card {
+            /* Adjusted for taller 7-card columns */
+            margin-top: -95px; 
+        }
+        .column .card:first-child {
+            margin-top: 0;
+        }
+        .cell, .foundation {
+            width: 80px;
+            height: 120px;
+            border: 2px dashed #AAA;
+            border-radius: 8px;
+            background-color: rgba(255, 255, 255, 0.1);
+            position: relative;
+        }
+        .foundation { 
+            border-style: solid; 
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            font-size: 4rem;
+            color: rgba(255, 255, 255, 0.1);
+        }
+        .cell:not(:empty) .card, .foundation:not(:empty) .card {
+            margin-top: 0;
+            position: absolute;
+            top: 0;
+            left: 0;
+        }
+        .hint {
+            display: none;
+            background: #fff8e1;
+            color: #6d4c0c;
+            border: 1px solid #ffeccc;
+            padding: 16px;
+            border-radius: 8px;
+            margin-top: 20px;
+            max-width: 600px;
+        }
+        .card.dragging {
+            opacity: 0.5;
+            cursor: grabbing;
+        }
+        .drop-target {
+            background-color: rgba(0, 255, 0, 0.1);
+            border-color: #0f0;
+        }
+    </style>
+</head>
+<body class="bg-gray-900 text-gray-100 p-6 min-h-screen flex flex-col items-center">
+
+    <h1 class="text-3xl font-bold mb-4">Solitaire Deadlock Solver</h1>
+    <!-- Updated description -->
+    <p class="mb-4 text-gray-400 max-w-2xl text-center">This demo is loaded with the 52-card game from your image. You can drag and drop cards or click the button to find 1-suit deadlocks.</p>
+
+    <div class="flex gap-4 mb-6">
+        <button id="findDeadlocks" class="bg-red-600 hover:bg-red-700 text-white font-bold py-2 px-4 rounded-lg shadow-md transition-all">1. Find Deadlocks</button>
+        <button id="showHint" class="bg-blue-600 hover:bg-blue-700 text-white font-bold py-2 px-4 rounded-lg shadow-md transition-all">2. Show Hint to Solve</button>
+        <button id="resetBoard" class="bg-gray-600 hover:bg-gray-700 text-white font-bold py-2 px-4 rounded-lg shadow-md transition-all">Reset Board</button>
+    </div>
+
+    <!-- Free Cells and Foundations -->
+    <div class="grid grid-cols-8 gap-4 w-full max-w-4xl mb-6">
+        <!-- Free Cells -->
+        <div id="cell-0" class="cell dropzone" data-type="cell" data-index="0"></div>
+        <div id="cell-1" class="cell dropzone" data-type="cell" data-index="1"></div>
+        <div id="cell-2" class="cell dropzone" data-type="cell" data-index="2"></div>
+        <div id="cell-3" class="cell dropzone" data-type="cell" data-index="3"></div>
+        <!-- Foundations -->
+        <div id="foundation-0" class="foundation dropzone" data-type="foundation" data-suit="0"><span class="suit-icon">♥</span></div>
+        <div id="foundation-1" class="foundation dropzone" data-type="foundation" data-suit="1"><span class="suit-icon">♦</span></div>
+        <div id="foundation-2" class="foundation dropzone" data-type="foundation" data-suit="2"><span class="suit-icon">♣</span></div>
+        <div id="foundation-3" class="foundation dropzone" data-type="foundation" data-suit="3"><span class="suit-icon">♠</span></div>
+    </div>
+
+    <!-- Tableau Columns -->
+    <div class="grid grid-cols-8 gap-4 w-full max-w-4xl">
+        <div id="column-0" class="column dropzone" data-type="column" data-index="0"></div>
+        <div id="column-1" class="column dropzone" data-type="column" data-index="1"></div>
+        <div id="column-2" class="column dropzone" data-type="column" data-index="2"></div>
+        <div id="column-3" class="column dropzone" data-type="column" data-index="3"></div>
+        <div id="column-4" class="column dropzone" data-type="column" data-index="4"></div>
+        <div id="column-5" class="column dropzone" data-type="column" data-index="5"></div>
+        <div id="column-6" class="column dropzone" data-type="column" data-index="6"></div>
+        <div id="column-7" class="column dropzone" data-type="column" data-index="7"></div>
+    </div>
+
+    <!-- Hint Box -->
+    <div id="hintBox" class="hint">
+        <!-- Updated Hint for the new board -->
+        <h3 class="font-bold text-lg mb-2">How to Solve the AS Deadlock (The A* Solution)</h3>
+        <p>This shows a solution for a key deadlock in **Column 5**: the <b>AS</b> (Ace of Spades) is stuck under a <b>3S</b>.</p>
+        <ol class="list-decimal list-inside mt-2 space-y-1">
+            <li>Find a place to move the <b>7H</b> (from Col 5).</li>
+            <li>Find a place to move the <b>7D</b> (from Col 5).</li>
+            <li>Find a place to move the <b>10H</b> (from Col 5).</li>
+            <li>Find a place to move the <b>8C</b> (from Col 5).</li>
+            <li>Move the <b>AC</b> (from Col 5) to the ♣ foundation.</li>
+            <li>Move the <b>3S</b> (from Col 5) to a free cell or another column.</li>
+            <li>**Move 7:** Now the <b>AS</b> is free! Move the <b>AS</b> (from Col 5) to the ♠ foundation.</li>
+        </ol>
+        <p class="mt-2 text-sm">The A* solver and the $m_e(n)$ heuristic are what find this specific 7-move (or longer) optimal path out of all possible moves!</p>
+    </div>
+
+    <script>
+        // --- Data ---
+        // Suit: 0=H, 1=D, 2=C, 3=S
+        // Rank: 1=A, 2-10, 11=J, 12=Q, 13=K
+        
+        // *** THIS IS THE UPDATED INPUT FROM YOUR IMAGE ***
+        const initialBoardState = {
+            columns: [
+                [{suit: 3, rank: 5}, {suit: 3, rank: 2}, {suit: 3, rank: 12}, {suit: 3, rank: 9}, {suit: 3, rank: 8}, {suit: 0, rank: 8}, {suit: 3, rank: 13}], // Col 0
+                [{suit: 3, rank: 10}, {suit: 0, rank: 6}, {suit: 0, rank: 1}, {suit: 0, rank: 9}, {suit: 0, rank: 5}, {suit: 0, rank: 12}, {suit: 0, rank: 4}], // Col 1
+                [{suit: 2, rank: 11}, {suit: 3, rank: 4}, {suit: 3, rank: 11}, {suit: 1, rank: 5}, {suit: 2, rank: 6}, {suit: 3, rank: 7}, {suit: 1, rank: 3}], // Col 2
+                [{suit: 2, rank: 7}, {suit: 2, rank: 4}, {suit: 2, rank: 2}, {suit: 1, rank: 2}, {suit: 0, rank: 2}, {suit: 3, rank: 11}, {suit: 0, rank: 13}], // Col 3
+                [{suit: 3, rank: 12}, {suit: 3, rank: 1}, {suit: 0, rank: 7}, {suit: 1, rank: 6}, {suit: 2, rank: 9}, {suit: 2, rank: 3}, {suit: 0, rank: 3}], // Col 4
+                [{suit: 2, rank: 3}, {suit: 3, rank: 1}, {suit: 3, rank: 8}, {suit: 0, rank: 3}, {suit: 3, rank: 10}, {suit: 1, rank: 7}, {suit: 0, rank: 7}], // Col 5
+                [{suit: 1, rank: 12}, {suit: 0, rank: 9}, {suit: 2, rank: 13}, {suit: 2, rank: 10}, {suit: 3, rank: 6}, {suit: 3, rank: 1}], // Col 6
+                [{suit: 2, rank: 8}, {suit: 0, rank: 10}, {suit: 3, rank: 5}, {suit: 3, rank: 11}, {suit: 0, rank: 10}, {suit: 3, rank: 4}, {suit: 1, rank: 4}]  // Col 7
+            ],
+            cells: [null, null, null, null],
+            foundations: [null, null, null, null]
+        };
+
+        let draggedCardElement = null;
+        let draggedCardData = null;
+
+        // --- DOM Elements ---
+        const findDeadlocksBtn = document.getElementById('findDeadlocks');
+        const showHintBtn = document.getElementById('showHint');
+        const resetBoardBtn = document.getElementById('resetBoard');
+        const hintBox = document.getElementById('hintBox');
+
+        // --- Functions ---
+
+        /**
+         * Converts card data to a string rank
+         */
+        function getRankStr(rank) {
+            if (rank === 1) return 'A';
+            if (rank === 11) return 'J';
+            if (rank === 12) return 'Q';
+            if (rank === 13) return 'K';
+            return rank.toString();
+        }
+
+        /**
+         * Converts card data to a suit character and color
+         */
+        function getSuitInfo(suit) {
+            switch (suit) {
+                case 0: return { char: '♥', color: 'is-red' };
+                case 1: return { char: '♦', color: 'is-red' };
+                case 2: return { char: '♣', color: 'is-black' };
+                case 3: return { char: '♠', color: 'is-black' };
+                default: return { char: '?', color: 'is-black' };
+            }
+        }
+
+        /**
+         * Creates a card DOM element
+         */
+        function createCard(cardData) {
+            const { suit, rank } = cardData;
+            const rankStr = getRankStr(rank);
+            const { char: suitChar, color } = getSuitInfo(suit);
+
+            const card = document.createElement('div');
+            card.className = `card ${color}`;
+            card.draggable = true;
+            // Store data on the element for logic
+            card.dataset.suit = suit;
+            card.dataset.rank = rank;
+            
+            card.innerHTML = `
+                <div class="card-top">${rankStr}${suitChar}</div>
+                <div class="card-bottom">${rankStr}${suitChar}</div>
+            `;
+            
+            // Add drag listeners
+            card.addEventListener('dragstart', handleDragStart);
+            card.addEventListener('dragend', handleDragEnd);
+            
+            return card;
+        }
+
+        /**
+         * Renders the entire board from the initial state
+         */
+        function renderBoard() {
+            // Clear all columns, cells, and foundations
+            document.querySelectorAll('.column, .cell, .foundation').forEach(col => {
+                col.innerHTML = '';
+            });
+            // Add back foundation suit icons
+            document.querySelectorAll('.foundation').forEach((f, i) => {
+                const { char: suitChar } = getSuitInfo(i);
+                f.innerHTML = `<span class="suit-icon" style="font-size: 4rem; color: rgba(255, 255, 255, 0.1);">${suitChar}</span>`;
+            });
+
+            // Render columns
+            initialBoardState.columns.forEach((colData, colIndex) => {
+                const colEl = document.getElementById(`column-${colIndex}`);
+                colData.forEach(cardData => {
+                    colEl.appendChild(createCard(cardData));
+                });
+            });
+            
+            clearHighlights();
+            hintBox.style.display = 'none';
+        }
+        
+        /**
+         * Clears all highlights from cards
+         */
+        function clearHighlights() {
+            document.querySelectorAll('.card').forEach(card => {
+                card.classList.remove('highlight-problem', 'highlight-blocker');
+            });
+        }
+
+        /**
+         * Finds and highlights deadlocks based on DOM
+         */
+        function findDeadlocks() {
+            clearHighlights();
+            let cycleCount = 0;
+            
+            document.querySelectorAll('.column').forEach((colEl, colIndex) => {
+                const cards = Array.from(colEl.querySelectorAll('.card'));
+                
+                for (let j = 0; j < cards.length; j++) {
+                    const cardX = cards[j];
+                    const cardXSuit = parseInt(cardX.dataset.suit);
+                    const cardXRank = parseInt(cardX.dataset.rank);
+                    
+                    for (let k = j + 1; k < cards.length; k++) {
+                        const cardY = cards[k];
+                        const cardYSuit = parseInt(cardY.dataset.suit);
+                        const cardYRank = parseInt(cardY.dataset.rank);
+                        
+                        // The deadlock condition from the C++ code
+                        if (cardXSuit === cardYSuit && cardXRank < cardYRank) {
+                            cycleCount++;
+                            console.log(`Cycle ${cycleCount} found in Col ${colIndex}: ${getRankStr(cardXRank)}${getSuitInfo(cardXSuit).char} is blocked by ${getRankStr(cardYRank)}${getSuitInfo(cardYSuit).char}`);
+                            cardX.classList.add('highlight-problem');
+                            cardY.classList.add('highlight-blocker');
+                        }
+                    }
+                }
+            });
+
+            if (cycleCount === 0) {
+                alert("No 1-suit deadlocks found on this board!");
+            } else {
+                alert(`Found ${cycleCount} 1-suit deadlock(s)! Check the highlighted cards.`);
+            }
+        }
+
+        // --- Drag and Drop Handlers ---
+
+        function handleDragStart(e) {
+            // Only allow dragging the last card in a column or a card in a cell
+            const isLastInColumn = e.target.parentElement.classList.contains('column') && e.target === e.target.parentElement.lastElementChild;
+            const isInCell = e.target.parentElement.classList.contains('cell');
+
+            if (isLastInColumn || isInCell) {
+                draggedCardElement = e.target;
+                draggedCardData = e.target.dataset;
+                setTimeout(() => e.target.classList.add('dragging'), 0);
+            } else {
+                e.preventDefault(); // Don't allow drag
+            }
+        }
+
+        function handleDragEnd(e) {
+            e.target.classList.remove('dragging');
+            draggedCardElement = null;
+            draggedCardData = null;
+            document.querySelectorAll('.drop-target').forEach(el => el.classList.remove('drop-target'));
+        }
+
+        function handleDragOver(e) {
+            e.preventDefault(); // Necessary to allow drop
+            const dropzone = e.target.closest('.dropzone');
+            if (dropzone && isValidDrop(dropzone)) {
+                dropzone.classList.add('drop-target');
+            }
+        }
+        
+        function handleDragLeave(e) {
+            const dropzone = e.target.closest('.dropzone');
+            if (dropzone) {
+                dropzone.classList.remove('drop-target');
+            }
+        }
+
+        function handleDrop(e) {
+            e.preventDefault();
+            const dropzone = e.target.closest('.dropzone');
+            if (dropzone && isValidDrop(dropzone)) {
+                // If it's a foundation or cell, it must be the direct target
+                if (dropzone.classList.contains('cell') || dropzone.classList.contains('foundation')) {
+                    // Remove placeholder icon
+                    if (dropzone.classList.contains('foundation')) {
+                        dropzone.innerHTML = ''; 
+                    }
+                    dropzone.appendChild(draggedCardElement);
+                }
+                // If it's a column, append to the end
+                else if (dropzone.classList.contains('column')) {
+                    dropzone.appendChild(draggedCardElement);
+                }
+                // If it's a card in a column, append after it
+                else if (e.target.closest('.card') && e.target.closest('.column')) {
+                     e.target.closest('.column').appendChild(draggedCardElement);
+                }
+            }
+            if (dropzone) {
+                 dropzone.classList.remove('drop-target');
+            }
+        }
+
+        function isValidDrop(dropzone) {
+            if (!draggedCardElement) return false;
+
+            const targetType = dropzone.dataset.type;
+            const cardRank = parseInt(draggedCardData.rank);
+            const cardSuit = parseInt(draggedCardData.suit);
+            const cardIsRed = cardSuit === 0 || cardSuit === 1;
+
+            // Case 1: Dropping on a Free Cell
+            if (targetType === 'cell') {
+                // A cell can only have one card
+                const children = Array.from(dropzone.children).filter(c => c.classList.contains('card'));
+                return children.length === 0;
+            }
+
+            // Case 2: Dropping on a Foundation
+            if (targetType === 'foundation') {
+                const foundationSuit = parseInt(dropzone.dataset.suit);
+                if (cardSuit !== foundationSuit) return false; // Must match suit
+
+                const topCard = dropzone.lastElementChild;
+                if (!topCard || topCard.classList.contains('suit-icon')) {
+                    return cardRank === 1; // Only Aces on empty foundations
+                } else {
+                    const topCardRank = parseInt(topCard.dataset.rank);
+                    return cardRank === topCardRank + 1; // Must be sequential
+                }
+            }
+
+            // Case 3: Dropping on a Column (either empty or on another card)
+            if (targetType === 'column') {
+                const topCard = dropzone.lastElementChild;
+                if (!topCard) {
+                    return true; // Any card can move to an empty column
+                } else {
+                    // Check logic for dropping on the card
+                    const topCardRank = parseInt(topCard.dataset.rank);
+                    const topCardSuit = parseInt(topCard.dataset.suit);
+                    const topCardIsRed = topCardSuit === 0 || topCardSuit === 1;
+                    
+                    // Rank must be one less
+                    if (cardRank !== topCardRank - 1) return false;
+                    // Color must alternate
+                    if (cardIsRed === topCardIsRed) return false;
+                    
+                    return true;
+                }
+            }
+            return false;
+        }
+
+        // --- Event Listeners ---
+        findDeadlocksBtn.addEventListener('click', findDeadlocks);
+        showHintBtn.addEventListener('click', () => {
+            hintBox.style.display = hintBox.style.display === 'block' ? 'none' : 'block';
+        });
+        resetBoardBtn.addEventListener('click', renderBoard);
+        
+        // Add drop listeners to all dropzones
+        document.querySelectorAll('.dropzone').forEach(zone => {
+            zone.addEventListener('dragover', handleDragOver);
+            zone.addEventListener('dragleave', handleDragLeave);
+            zone.addEventListener('drop', handleDrop);
+        });
+
+        // Initial render
+        renderBoard();
+    </script>
+</body>
+</html>
